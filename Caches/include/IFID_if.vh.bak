@@ -1,0 +1,29 @@
+/*
+Vaibhav Ramachandran
+Instruction Fetch/Instruction Decode Pipeline Register Interface
+ramachav@purdue.edu
+Section 3
+*/
+
+`ifndef IFID_IF_VH
+`define IFID_IF_VH
+
+`include "cpu_types_pkg.vh"
+
+interface IFID_if;
+
+import cpu_types_pkg::*;
+
+word_t imemload_if, pc_nextstate_if, pc_nextstate_id, imemload_id, imemaddr_if, imemaddr_id;
+logic enable_ifid;
+logic flush_ifid;
+
+modport IFID 
+(
+	input imemload_if, imemaddr_if, pc_nextstate_if, enable_ifid, flush_ifid, 
+	output imemload_id, imemaddr_id, pc_nextstate_id
+);
+
+endinterface
+
+`endif
