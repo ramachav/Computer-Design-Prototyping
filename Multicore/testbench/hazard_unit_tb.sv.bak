@@ -1,0 +1,175 @@
+/*
+Vaibhav Ramachandran
+Hazard Unit Testbench
+Section 3
+ramachav@purdue.edu
+*/
+
+`include "cpu_types_pkg.vh"
+`include "hazard_unit_if.vh"
+`timescale 1 ns / 1 ns
+
+import cpu_types_pkg::*;
+
+module hazard_unit_tb();
+
+	hazard_unit_if tbhuif();
+	logic CLK = 0, nRST;
+	parameter PERIOD = 10;
+
+	always #(PERIOD/2) CLK++;
+
+	test PROG (CLK, nRST, tbhuif);
+
+	`ifndef MAPPED
+	hazard_unit DUT(tbhuif);
+	`else
+	hazard_unit DUT(
+	.\tbhuif.jump_ex (tbhuif.jump_ex),
+	.\tbhuif.branch_ex (tbhuif.branch_ex),
+	.\tbhuif.dREN_ex (tbhuif.dREN_ex),
+	.\tbhuif.ihit (tbhuif.ihit),
+	.\tbhuif.Rs_id (tbhuif.Rs_id),
+	.\tbhuif.Rt_id (tbhuif.Rt_id),
+	.\tbhuif.Rt_ex (tbhuif.Rt_ex),
+	.\tbhuif.stall_ifid (tbhuif.stall_ifid),
+	.\tbhuif.flush_ifid (tbhuif.flush_ifid),
+	.\tbhuif.flush_idex (tbhuif.flush_idex),
+	.\tbhuif.pc_wen (tbhuif.pc_wen),
+	.\tbhuif.lduse_hit (tbhuif.lduse_hit)
+	);
+	`endif
+
+endmodule
+
+program test
+(
+	input logic CLK,
+	output logic nRST,
+	hazard_unit_if tbhuif
+);
+
+int test_number = 0;
+parameter CHECK_DELAY = 5;
+
+initial begin
+
+	//Test case 0: Reset everything
+	nRST = 0;
+	@(posedge CLK)
+	@(posedge CLK)
+	nRST = 1;
+
+	tbhuif.jump_ex = 0;
+	tbhuif.branch_ex = 0;
+	tbhuif.dREN_ex = 0;
+	tbhuif.ihit = 0;
+	tbhuif.Rs_id = '0;
+	tbhuif.Rt_id = '0;
+	tbhuif.Rt_ex = '0;
+
+	$display("Hazard Unit Test Cases:");
+
+	//Test case 1: Enable only ihit and then check the outputs
+	test_number = 1;
+	@(posedge CLK)
+	tbhuif.jump_ex = 0;
+	tbhuif.branch_ex = 0;
+	tbhuif.dREN_ex = 0;
+	tbhuif.ihit = 1;
+	tbhuif.Rs_id = '0;
+	tbhuif.Rt_id = '0;
+	tbhuif.Rt_ex = '0;
+	#CHECK_DELAY
+	#CHECK_DELAY
+	assert(tbhuif.pc_wen && !tbhuif.stall_ifid && !tbhuif.lduse_hit && !tbhuif.flush_ifid && !tbhuif.flush_idex)
+	$display("Test case 1 passed.");
+	else $display("Test case 1 failed.");
+
+	//Test case 2: Enable ihit and dREN_ex as well as make the Rs_id equal the Rt_ex and check the outputs	
+	test_number++;
+	@(posedge CLK)
+	tbhuif.jump_ex = 0;
+	tbhuif.branch_ex = 0;
+	tbhuif.dREN_ex = 1;
+	tbhuif.ihit = 1;
+	tbhuif.Rs_id = 5'd25;
+	tbhuif.Rt_id = 5'd3;
+	tbhuif.Rt_ex = 5'd25;
+	#CHECK_DELAY
+	#CHECK_DELAY
+	assert(!tbhuif.pc_wen && tbhuif.stall_ifid && tbhuif.lduse_hit && !tbhuif.flush_ifid && !tbhuif.flush_idex)
+	$display("Test case 2 passed.");
+	else $display("Test case 2 failed.");
+
+	//Test case 3: Disable ihit but enable the branch_ex and dREN_ex inputs and make the Rt_id equal the Rt_ex and check the outputs
+	test_number++;
+	@(posedge CLK)
+	tbhuif.jump_ex = 0;
+	tbhuif.branch_ex = 1;
+	tbhuif.dREN_ex = 1;
+	tbhuif.ihit = 0;
+	tbhuif.Rs_id = 5'd3;
+	tbhuif.Rt_id = 5'd25;
+	tbhuif.Rt_ex = 5'd25;
+	#CHECK_DELAY
+	#CHECK_DELAY
+	assert(!tbhuif.pc_wen && tbhuif.stall_ifid && tbhuif.lduse_hit && !tbhuif.flush_ifid && !tbhuif.flush_idex)
+	$display("Test case 3 passed.");
+	else $display("Test case 3 failed.");
+	
+	//Test case 4: Enable the ihit and disable the dREN_ex inputs and assert the jump_ex flag and check the outputs (Rs_id has also been made equal to Rt_ex)
+	test_number++;
+	@(posedge CLK)
+	tbhuif.jump_ex = 1;
+	tbhuif.branch_ex = 0;
+	tbhuif.dREN_ex = 0;
+	tbhuif.ihit = 1;
+	tbhuif.Rs_id = 5'd25;
+	tbhuif.Rt_id = 5'd3;
+	tbhuif.Rt_ex = 5'd25;
+	#CHECK_DELAY
+	#CHECK_DELAY
+	assert(tbhuif.pc_wen && !tbhuif.stall_ifid && !tbhuif.lduse_hit && tbhuif.flush_ifid && tbhuif.flush_idex)
+	$display("Test case 4 passed.");
+	else $display("Test case 4 failed.");
+
+	//Test case 5: Enable the ihit, branch_ex and the dREN_ex signals but make both Rs_id and Rt_id not equal to Rt_ex and check the outputs
+	test_number++;
+	@(posedge CLK)
+	tbhuif.jump_ex = 0;
+	tbhuif.branch_ex = 1;
+	tbhuif.dREN_ex = 1;
+	tbhuif.ihit = 1;
+	tbhuif.Rs_id = 5'd12;
+	tbhuif.Rt_id = 5'd19;
+	tbhuif.Rt_ex = 5'd2;
+	#CHECK_DELAY
+	#CHECK_DELAY
+	assert(tbhuif.pc_wen && !tbhuif.stall_ifid && !tbhuif.lduse_hit && tbhuif.flush_ifid && tbhuif.flush_idex)
+	$display("Test case 5 passed.");
+	else $display("Test case 5 failed.");
+
+	//Test case 6: 
+	test_number++;
+	@(posedge CLK)
+	tbhuif.jump_ex = 0;
+	tbhuif.branch_ex = 0;
+	tbhuif.dREN_ex = 1;
+	tbhuif.ihit = 1;
+	tbhuif.Rs_id = 5'd25;
+	tbhuif.Rt_id = 5'd3;
+	tbhuif.Rt_ex = 5'd25;
+	#CHECK_DELAY
+	#CHECK_DELAY
+	assert(!tbhuif.pc_wen && tbhuif.stall_ifid && tbhuif.lduse_hit && !tbhuif.flush_ifid && !tbhuif.flush_idex)
+	$display("Test case 6 passed.");
+	else $display("Test case 6 failed.");
+
+	#CHECK_DELAY
+	#CHECK_DELAY
+
+$finish;
+
+end
+endprogram 

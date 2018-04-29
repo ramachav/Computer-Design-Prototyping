@@ -1,0 +1,392 @@
+/*
+  Eric Villasenor
+  evillase@gmail.com
+
+  datapath contains register file, control, hazard,
+  muxes, and glue logic for processor
+*/
+/*
+Vaibhav Ramachandran
+Datapath Unit
+ramachav@purdue.edu
+Section 3
+*/
+
+// data path interface
+`include "datapath_cache_if.vh"
+//control unit interface
+`include "control_unit_if.vh"
+//instruction fetch/instruction decode latch interface
+`include "IFID_if.vh"
+//instruction decode/execute latch interface
+`include "IDEX_if.vh"
+//execute/memory latch interface
+`include "EXMEM_if.vh"
+//memory/write back latch interface
+`include "MEMWB_if.vh"
+//hazard unit Interface
+`include "hazard_unit_if.vh"
+//forwarding unit interface
+`include "forwarding_unit_if.vh"
+//alu interface
+`include "alu_if.vh"
+//register file interface
+`include "register_file_if.vh"
+//branch target buffer interface
+`include "branch_target_buffer_if.vh"
+//branch predictor interface 
+`include "branch_predictor_if.vh"
+// alu op, mips op, and instruction type
+`include "cpu_types_pkg.vh"
+//request unit interface
+//`include "request_unit_if.vh"		The Request Unit is no longer needed.
+
+module datapath
+(
+  	input logic CLK, nRST,
+  	datapath_cache_if.dp dpif
+);
+// import types
+import cpu_types_pkg::*;
+
+// pc init
+parameter PC_INIT = 0;
+
+//instantiating the interfaces
+control_unit_if cuif();
+alu_if aluif();
+register_file_if rfif();
+IFID_if ifid();
+IDEX_if idex();
+EXMEM_if exmem();
+MEMWB_if memwb();
+hazard_unit_if huif();
+forwarding_unit_if fuif();
+branch_target_buffer_if btbif();
+branch_predictor_if bpif();
+//request_unit_if ruif();	The Request Unit is no longer needed.
+
+//wrappers for the different components
+control_unit CONTROL_UNIT (cuif);
+alu ALU (aluif);
+register_file REGISTER_FILE (CLK, nRST, rfif);
+pipeline_register PIPELINE_REG (CLK, nRST, ifid, idex, exmem, memwb);
+hazard_unit HAZARD_UNIT (huif);
+forwarding_unit FORWARDING_UNIT (fuif);
+branch_target_buffer BRANCH_TARGET_BUFFER (CLK, nRST, btbif);
+branch_predictor BRANCH_PREDICTOR (CLK, nRST, bpif);
+//request_unit REQUEST_UNIT (CLK, nRST, ruif);		The Request Unit is no longer needed.
+
+//registers used for the PC block
+word_t pc_input, pc_output, pc_nextstate;
+logic pc_wen, PCSrc;
+
+//registers used for the ALU
+word_t regFile_data;
+
+//Datapath signals
+assign dpif.imemREN = cuif.iREN;
+assign dpif.imemaddr = pc_output;
+assign dpif.dmemREN = exmem.dmemren;
+assign dpif.dmemWEN = exmem.dmemwen;
+assign dpif.dmemstore = exmem.dmemstore;
+assign dpif.dmemaddr = exmem.dmemaddr;
+assign dpif.datomic = exmem.datomic_mem;
+
+//halt signal used for the memory block to stop reading data
+always_ff @(posedge CLK, negedge nRST) begin
+	if(~nRST)
+		dpif.halt <= 0;
+	else if(exmem.halt_mem)
+		dpif.halt <= 1;
+	else 
+		dpif.halt <= dpif.halt;
+end
+
+//PC signals
+assign pc_wen = huif.pc_wen && dpif.ihit; 
+assign pc_nextstate = pc_output + WBYTES;
+assign PCSrc = (exmem.beq_mem && exmem.zero_mem) || (exmem.bne_mem && ~exmem.zero_mem);
+
+//PC input combinational logic block
+always_comb begin
+	pc_input = pc_nextstate;
+	if(PCSrc && ~exmem.branch_hit_mem)
+		pc_input = exmem.branch_target_mem;
+	else if(~PCSrc && exmem.branch_hit_mem)	//Predicted wrong and now it's time to flush everything and go back to the original pc + 4
+		pc_input = exmem.pc_nextstate_mem;
+	else if(btbif.branch_hit)
+		pc_input = {btbif.target_address, 2'b00};
+	else if(idex.jump_id)
+		pc_input = {idex.jumpoffset_id, idex.jumpaddr_id, 2'b00};
+	else if(exmem.jr_ex) 
+		pc_input = exmem.rdat1_ex;
+end
+
+//PC block
+always_ff @(posedge CLK, negedge nRST) begin
+	if(~nRST)
+		pc_output <= PC_INIT;
+	else if(pc_wen)
+		pc_output <= pc_input;
+	else
+		pc_output <= pc_output;
+end
+
+//Control Unit signals
+assign cuif.Instruct = opcode_t'(ifid.imemload_id[31:26]);
+assign cuif.funct = funct_t'(ifid.imemload_id[5:0]);
+//assign cuif.overflow = aluif.overflow; --> overflow flag is not used in the control unit so this is no longer needed
+//assign cuif.zero = aluif.zero; --> zero flag no longer passed into the control unit. Branch logic changed.
+
+//Request Unit signals --> No longer needed for the pipeline processor
+/*
+assign ruif.halt = cuif.halt;
+assign ruif.iREN = cuif.iREN;
+assign ruif.dREN = cuif.dREN;
+assign ruif.dWEN = cuif.dWEN;
+assign ruif.ihit = dpif.ihit;
+assign ruif.dhit = dpif.dhit;
+*/
+
+//Regsiter File signals
+assign rfif.rsel1 = ifid.imemload_id[25:21];
+assign rfif.rsel2 = ifid.imemload_id[20:16];
+assign rfif.wsel = memwb.RegDst_wb;
+assign rfif.WEN = memwb.RegWr_wb;
+
+//Register File input data combinational block
+always_comb begin
+	rfif.wdat = memwb.wdat_wb;
+	if(memwb.mem2reg_wb)
+		rfif.wdat = memwb.dmemload_wb;
+	else if(memwb.jal_wb)
+		rfif.wdat = memwb.pc_nextstate_wb;
+	else if(memwb.lui_wb)
+		rfif.wdat = {memwb.imm16_wb, 16'b0};
+end
+
+//ALU signals
+assign aluif.ALUOP = idex.ALUop_ex;
+
+//ALU Port A combinational block
+always_comb begin
+	aluif.port_A = idex.rdat1_ex;
+	//Forwarding from the WB stage
+	if(memwb.lui_wb) begin
+		if(fuif.forward_A == 2'b01)
+			aluif.port_A = {memwb.imm16_wb, 16'b0};
+	end
+	else if(memwb.jal_wb) begin
+		if(fuif.forward_A == 2'b01)
+			aluif.port_A = memwb.pc_nextstate_wb;
+	end
+	else if(memwb.mem2reg_wb) begin
+		if(fuif.forward_A == 2'b01)
+			aluif.port_A = memwb.dmemload_wb;
+	end
+	else begin
+		if(fuif.forward_A == 2'b01)
+			aluif.port_A = memwb.wdat_wb;
+	end
+	//Forwarding from the MEM stage
+	if(exmem.lui_mem) begin
+		if(fuif.forward_A == 2'b10)
+			aluif.port_A = {exmem.imm16_mem, 16'b0};
+	end
+	else if(exmem.jal_mem) begin
+		if(fuif.forward_A == 2'b10)
+			aluif.port_A = exmem.pc_nextstate_mem;
+	end
+	else if(exmem.mem2reg_mem) begin
+		if(fuif.forward_A == 2'b10)
+			aluif.port_A = memwb.dmemload;
+	end
+	else begin
+		if(fuif.forward_A == 2'b10)
+			aluif.port_A = memwb.wdat_mem;
+	end
+end
+
+//ALU source mux for Port B combinational block
+always_comb begin
+	regFile_data = idex.rdat2_ex;
+	//Forwarding from the WB stage
+	if(memwb.lui_wb) begin
+		if(fuif.forward_B == 2'b01)
+			regFile_data = {memwb.imm16_wb, 16'b0};
+	end
+	else if(memwb.jal_wb) begin
+		if(fuif.forward_B == 2'b01)
+			regFile_data = memwb.pc_nextstate_wb;
+	end
+	else if(memwb.mem2reg_wb) begin
+		if(fuif.forward_B == 2'b01)
+			regFile_data = memwb.dmemload_wb;
+	end
+	else begin
+		if(fuif.forward_B == 2'b01)
+			regFile_data = memwb.wdat_wb;
+	end
+	//Forwarding from the MEM stage
+	if(exmem.lui_mem) begin
+		if(fuif.forward_B == 2'b10)
+			regFile_data = {exmem.imm16_mem, 16'b0};
+	end
+	else if(exmem.jal_mem) begin
+		if(fuif.forward_B == 2'b10)
+			regFile_data = exmem.pc_nextstate_mem;
+	end
+	else if(exmem.mem2reg_mem) begin
+		if(fuif.forward_B == 2'b10)
+			regFile_data = memwb.dmemload;
+	end
+	else begin
+		if(fuif.forward_B == 2'b10)
+			regFile_data = memwb.wdat_mem;
+	end
+end
+
+//ALU Port B combinational block
+always_comb begin
+	aluif.port_B = regFile_data;
+	if(idex.ALUSrc_ex == 2'b01)
+		aluif.port_B = {27'b0, idex.shamt_ex};
+	else if(idex.ALUSrc_ex == 2'b10)
+		aluif.port_B = idex.imm16_extend_ex;
+end
+
+//Forwarding Unit Signals
+assign fuif.RegWr_wb = memwb.RegWr_wb;
+assign fuif.RegWr_mem = exmem.RegWr_mem;
+assign fuif.RegDst_wb = memwb.RegDst_wb;
+assign fuif.RegDst_mem = exmem.RegDst_mem;
+assign fuif.Rs_ex = idex.Rs_ex;
+assign fuif.Rt_ex = idex.Rt_ex;
+
+//Hazard Unit Signals
+assign huif.jump_id = idex.jump_id;
+assign huif.jump_ex = idex.jr_ex;
+assign huif.branch_mem = (exmem.beq_mem && exmem.zero_mem) || (exmem.bne_mem && ~exmem.zero_mem);
+assign huif.dREN_ex = idex.dREN_ex;
+assign huif.dWEN_ex = idex.dWEN_ex;
+assign huif.Rt_ex = exmem.RegDst_mem;
+assign huif.RegWr_mem = exmem.RegWr_mem;
+assign huif.Rt_id = idex.Rt_id;
+assign huif.Rs_id = ifid.imemload_id[25:21];
+assign huif.dhit = dpif.dhit;
+
+//Branch Target Buffer Signals
+assign btbif.mapping_sel = ifid.imemaddr_if[3:2];
+assign btbif.mapping_wsel = exmem.imemaddr_mem[3:2];
+assign btbif.tag_bits = ifid.imemaddr_if[31:4];
+assign btbif.btb_wen = (huif.branch_mem && ~exmem.branch_hit_mem) || (~huif.branch_mem && exmem.branch_hit_mem);
+assign btbif.slot_enabled = huif.branch_mem && ~exmem.branch_hit_mem;
+assign btbif.tag_bits_new = exmem.imemaddr_mem[31:4];
+assign btbif.target_address_new = exmem.branch_target_mem[31:2];
+assign btbif.branch_history_new = bpif.branch_history_new;
+assign btbif.flush_ifid = bpif.wrong_prediction;
+assign btbif.flush_idex = bpif.wrong_prediction;
+assign btbif.flush_exmem = bpif.wrong_prediction;
+
+//Branch Predictor Signals
+assign bpif.wrong_prediction = (huif.branch_mem && ~exmem.branch_hit_mem) || (~huif.branch_mem && exmem.branch_hit_mem);
+assign bpif.branch_history = exmem.branch_history_mem;
+assign bpif.branch_mem = huif.branch_mem;
+
+//Instruction Fetch/Instruction Decode Latch Signals
+assign ifid.enable_ifid = dpif.ihit && ~memwb.halt_wb && ~huif.stall_ifid;
+assign ifid.flush_ifid = (huif.flush_ifid || btbif.flush_ifid) && dpif.ihit;
+assign ifid.imemload_if = dpif.imemload;
+assign ifid.pc_nextstate_if = pc_output + WBYTES;
+assign ifid.imemaddr_if = pc_output;
+assign ifid.branch_history_if = btbif.branch_history;
+assign ifid.branch_hit_if = btbif.branch_hit;
+assign ifid.target_address_if = btbif.target_address;
+
+//Instruction Decode/Execute Latch Signals
+assign idex.enable_idex = dpif.ihit;
+assign idex.flush_idex = (huif.flush_idex || btbif.flush_idex) && dpif.ihit;
+assign idex.jumpaddr_id = ifid.imemload_id[25:0];
+assign idex.jumpoffset_id = idex.pc_nextstate_id[31:28];
+assign idex.pc_nextstate_id = ifid.pc_nextstate_id;
+assign idex.imm16_id = ifid.imemload_id[15:0];
+assign idex.Rd_id = ifid.imemload_id[15:11];
+assign idex.Rt_id = ifid.imemload_id[20:16];
+assign idex.Rs_id = ifid.imemload_id[25:21];
+assign idex.rdat1_id = rfif.rdat1;
+assign idex.rdat2_id = rfif.rdat2;
+assign idex.ALUop_id = cuif.ALUop;
+assign idex.ALUSrc_id = cuif.ALUSrc;
+assign idex.RegDst_id = cuif.RegDst;
+assign idex.RegWr_id = cuif.RegWr;
+assign idex.halt_id = cuif.halt;
+assign idex.lui_id = cuif.lui;
+assign idex.dREN_id = cuif.dREN;
+assign idex.dWEN_id = cuif.dWEN;
+assign idex.jump_id = cuif.jump;
+assign idex.jr_id = cuif.jr;
+assign idex.jal_id = cuif.jal;
+assign idex.ExtOp_id = cuif.ExtOp;
+assign idex.mem2reg_id = cuif.mem2reg;
+assign idex.beq_id = cuif.beq;
+assign idex.bne_id = cuif.bne;
+assign idex.imm16_extend_ex = ((idex.ExtOp_ex == 1)? { {16{idex.imm16_ex[15]}}, idex.imm16_ex[15:0] } : {16'b0, idex.imm16_ex[15:0]});
+assign idex.shamt_ex = idex.imm16_ex[10:6];
+assign idex.imemload_id = ifid.imemload_id;
+assign idex.imemaddr_id = ifid.imemaddr_id;
+assign idex.branch_history_id = ifid.branch_history_id;
+assign idex.branch_hit_id = ifid.branch_hit_id;
+assign idex.target_address_id = ifid.target_address_id;
+assign idex.datomic_id = cuif.datomic;
+
+//Execute/Memory Latch Signals
+assign exmem.enable_exmem = dpif.ihit;
+assign exmem.flush_exmem = btbif.flush_exmem && dpif.ihit;
+assign exmem.dhit = dpif.dhit;
+assign exmem.branch_target_mem = exmem.pc_nextstate_mem + { {14{exmem.imm16_mem[15]}}, exmem.imm16_mem, 2'b00 };
+assign exmem.imm16_ex = idex.imm16_ex;
+assign exmem.zero_ex = aluif.zero;
+assign exmem.beq_ex = idex.beq_ex;
+assign exmem.bne_ex = idex.bne_ex;
+assign exmem.jr_ex = idex.jr_ex;
+assign exmem.jal_ex = idex.jal_ex;
+assign exmem.jump_ex = idex.jump_ex;
+assign exmem.mem2reg_ex = idex.mem2reg_ex;
+assign exmem.halt_ex = idex.halt_ex;
+assign exmem.lui_ex = idex.lui_ex;
+assign exmem.dREN_ex = idex.dREN_ex;
+assign exmem.dWEN_ex = idex.dWEN_ex;
+assign exmem.RegWr_ex = idex.RegWr_ex;
+assign exmem.RegDst_ex = (idex.RegDst_ex == 2'b00)? idex.Rt_ex : ((idex.RegDst_ex == 2'b01)? idex.Rd_ex : 5'b11111);
+assign exmem.rdat1_ex = idex.rdat1_ex;
+assign exmem.wdat_ex = aluif.output_port;
+assign exmem.pc_nextstate_ex = idex.pc_nextstate_ex;
+assign exmem.jumpaddr_ex = idex.jumpaddr_ex;
+assign exmem.jumpoffset_ex = idex.pc_nextstate_ex[31:28];
+assign exmem.dmemaddr = exmem.wdat_mem;
+assign exmem.imemload_ex = idex.imemload_ex;
+assign exmem.imemaddr_ex = idex.imemaddr_ex;
+assign exmem.lduse_hit_ex = huif.lduse_hit;
+assign exmem.rdat2_ex = regFile_data;
+assign exmem.branch_history_ex = idex.branch_history_ex;
+assign exmem.branch_hit_ex = idex.branch_hit_ex;
+assign exmem.target_address_ex = idex.target_address_ex;
+assign exmem.datomic_ex = idex.datomic_ex;
+
+//Memory/Write Back Latch Signals
+assign memwb.enable_memwb = dpif.ihit || dpif.dhit;
+assign memwb.mem2reg_mem = exmem.mem2reg_mem;
+assign memwb.jal_mem = exmem.jal_mem;
+assign memwb.lui_mem = exmem.lui_mem;
+assign memwb.RegWr_mem = exmem.RegWr_mem;
+assign memwb.RegDst_mem = exmem.RegDst_mem;
+assign memwb.wdat_mem = (exmem.lduse_hit_mem)? memwb.dmemload : exmem.wdat_mem;
+assign memwb.pc_nextstate_mem = exmem.pc_nextstate_mem;
+assign memwb.imm16_mem = exmem.imm16_mem;
+assign memwb.dmemload = dpif.dmemload;
+assign memwb.halt_mem = exmem.halt_mem;
+assign memwb.imemload_mem = exmem.imemload_mem;
+assign memwb.imemaddr_mem = exmem.imemaddr_mem;
+
+endmodule 

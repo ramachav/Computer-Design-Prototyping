@@ -1,0 +1,28 @@
+/*
+Vaibhav Ramachandran
+Branch Predictor Unit Interface
+Section 3
+ramachav@purdue.edu
+*/
+
+`ifndef BRANCH_PREDICTOR_IF_VH
+`define BRANCH_PREDICTOR_IF_VH
+
+`include "cpu_types_pkg.vh"
+
+interface branch_predictor_if;
+
+import cpu_types_pkg::*;
+
+logic decision, wrong_prediction, branch_mem;
+logic [1:0] branch_history, branch_history_new;
+
+modport bp
+(
+	input wrong_prediction, branch_mem, branch_history,
+	output decision, branch_history_new
+);
+
+endinterface 
+
+`endif

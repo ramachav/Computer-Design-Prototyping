@@ -1,0 +1,67 @@
+/*
+Vaibhav Ramachandran
+Branch Predictor Unit
+Section 3
+ramachav@purdue.edu
+*/
+
+`include "cpu_types_pkg.vh"
+`include "branch_predictor_if.vh"
+
+module branch_predictor
+(
+	input CLK, nRST,
+	branch_predictor_if bpif
+);
+
+import cpu_types_pkg::*;
+
+logic [1:0] nextstate_predict;
+
+//HARD_TAKEN = 2'b11, SOFT_TAKEN = 2'b10, HARD_NOT_TAKEN = 2'b00, SOFT_NOT_TAKEN = 2'b01
+
+assign bpif.decision = (bpif.branch_history_new == 2'b00 || bpif.branch_history_new == 2'b11);
+
+always_ff @(posedge CLK, negedge nRST) begin
+	if(~nRST) 
+		bpif.branch_history_new <= 2'b00;
+	else if(bpif.branch_mem)
+		bpif.branch_history_new <= nextstate_predict;
+	else
+		bpif.branch_history_new <= bpif.branch_history_new;
+end
+
+//HARD_TAKEN = 2'b11, SOFT_TAKEN = 2'b10, HARD_NOT_TAKEN = 2'b00, SOFT_NOT_TAKEN = 2'b01
+always_comb begin
+	nextstate_predict = bpif.branch_history;
+	if(bpif.branch_mem) begin
+		casez(bpif.branch_history) 
+			2'b11: begin
+				if(!bpif.wrong_prediction)
+					nextstate_predict = 2'b11;
+				else
+					nextstate_predict = 2'b10;
+			end
+			2'b10: begin
+				if(!bpif.wrong_prediction)
+					nextstate_predict = 2'b11;
+				else
+					nextstate_predict = 2'b00;
+			end
+			2'b00: begin
+				if(!bpif.wrong_prediction)
+					nextstate_predict = 2'b00;
+				else
+					nextstate_predict = 2'b01;
+			end
+			2'b01: begin
+				if(!bpif.wrong_prediction)
+					nextstate_predict = 2'b00;
+				else
+					nextstate_predict = 2'b11;
+			end
+		endcase
+	end 
+end
+
+endmodule 

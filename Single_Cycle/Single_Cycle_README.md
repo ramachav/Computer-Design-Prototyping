@@ -1,0 +1,1 @@
+Fully functional single cycle processor based on the MIPS instruction set architecture. (Single Cycle means each instruction takes one long, slow clock cycle to implement. Performance is dictated by the time taken to execute the slowest instructions (loads and stores to memory))

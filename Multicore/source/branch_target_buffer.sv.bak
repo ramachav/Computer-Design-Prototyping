@@ -1,0 +1,92 @@
+/*
+Vaibhav Ramachandran
+Branch Target Buffer
+Section 3
+ramachav@purdue.edu
+*/
+
+`include "cpu_types_pkg.vh"
+`include "branch_target_buffer_if.vh"
+
+module branch_target_buffer
+(
+	input CLK, nRST,
+	branch_target_buffer_if btbif
+);
+
+import cpu_types_pkg::*;
+
+logic [60:0] buffer_0, buffer_1, buffer_2, buffer_3;
+//slot_enabled: whether there is anything within the slot of the btb or not and also whether the data present in the slot should be read or not, branch_hit: whether the branch was correctly found or not
+always_ff @(posedge CLK, negedge nRST) begin
+	if(~nRST) begin
+		buffer_0 <= '0;
+		buffer_1 <= '0;
+		buffer_2 <= '0;
+		buffer_3 <= '0;
+	end
+	else if(btbif.btb_wen) begin
+		case(btbif.mapping_wsel)
+			2'b00: begin
+				buffer_0[27:0] <= btbif.tag_bits_new;
+				buffer_0[57:28] <= btbif.target_address_new;
+				buffer_0[58] <= btbif.slot_enabled;
+				buffer_0[60:59] <= btbif.branch_history_new;
+			end
+			2'b01: begin
+				buffer_1[27:0] <= btbif.tag_bits_new;
+				buffer_1[57:28] <= btbif.target_address_new;
+				buffer_1[58] <= btbif.slot_enabled;
+				buffer_1[60:59] <= btbif.branch_history_new;
+			end
+			2'b10: begin
+				buffer_2[27:0] <= btbif.tag_bits_new;
+				buffer_2[57:28] <= btbif.target_address_new;
+				buffer_2[58] <= btbif.slot_enabled;
+				buffer_2[60:59] <= btbif.branch_history_new;
+			end
+			2'b11: begin
+				buffer_3[27:0] <= btbif.tag_bits_new;
+				buffer_3[57:28] <= btbif.target_address_new;
+				buffer_3[58] <= btbif.slot_enabled;
+				buffer_3[60:59] <= btbif.branch_history_new;
+			end
+		endcase
+	end
+	else begin
+		buffer_0 <= buffer_0;
+		buffer_1 <= buffer_1;
+		buffer_2 <= buffer_2;
+		buffer_3 <= buffer_3;
+	end
+end
+//slot_enabled: whether there is anything within the slot of the btb or not, branch_hit: whether the branch was correctly found or not
+always_comb begin
+	btbif.branch_hit = 0;
+	btbif.target_address = 0;
+	btbif.branch_history = 0;
+	case(btbif.mapping_sel)	
+		2'b00: begin
+			btbif.branch_hit = (buffer_0[27:0] == btbif.tag_bits) && buffer_0[58];
+			btbif.target_address = buffer_0[57:28];
+			btbif.branch_history = buffer_0[60:59];
+		end
+		2'b01: begin
+			btbif.branch_hit = (buffer_1[27:0] == btbif.tag_bits) && buffer_1[58];
+			btbif.target_address = buffer_1[57:28];
+			btbif.branch_history = buffer_1[60:59];
+		end
+		2'b10: begin
+			btbif.branch_hit = (buffer_2[27:0] == btbif.tag_bits) && buffer_2[58];
+			btbif.target_address = buffer_2[57:28];
+			btbif.branch_history = buffer_2[60:59];
+		end
+		2'b11: begin
+			btbif.branch_hit = (buffer_3[27:0] == btbif.tag_bits) && buffer_3[58];
+			btbif.target_address = buffer_3[57:28];
+			btbif.branch_history = buffer_3[60:59];
+		end
+	endcase
+end
+
+endmodule 

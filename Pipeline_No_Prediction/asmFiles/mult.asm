@@ -1,0 +1,28 @@
+org 0x0000
+
+ori $29, $0, 0x4000 #setting the stack pointer to address 0xFFFC
+ori $4,  $0, 0x0003 #storing the first operand in a register
+ori $5,  $0, 0x0012 #storing the second operand in another register
+ori $6,  $0, 0x0001 #1 will be need for subtracting from the second operand
+ori $7,  $0, 0x0000 #initializing register to zero to store the result
+ori $20, $0, 0x1000 #random memory location to store the final value
+
+#pushing contents of register 4 and then 5 onto the stack
+push $4
+push $5
+
+#start of the multiplication
+pop $4
+pop $5
+
+multiplication_loop:
+beq $5, $0, end_of_multiplication
+addu $7, $7, $4
+subu $5, $5, $6
+j multiplication_loop
+
+end_of_multiplication:
+sw $7, 0($20)
+push $7
+
+halt
