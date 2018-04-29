@@ -1,5 +1,5 @@
 # Computer-Design-Prototyping
-Computer Design and Prototyping project where I designed a multicore 5 stage pipelined processor with L1 cache implementation. It is based on the MIPS instruction set architecture.
+Computer Design and Prototyping project where I designed a multicore 5 stage pipelined processor with L1 cache implementation. The MSI coherence protocol is also implemented to take care of coherency issues. It is based on the MIPS instruction set architecture.
 
 
 Processor designs currently completed and fully functioning :-
