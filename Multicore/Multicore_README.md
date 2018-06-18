@@ -1,1 +1,1 @@
-Currently the Multicore design only contains a working coherence protocol design. Will be interfaced with the data caches and the datapath in the future weeks.
+Completely working Multicore Design that implements an L-1 cache hierarchy and an MSI cache coherence protocol.
